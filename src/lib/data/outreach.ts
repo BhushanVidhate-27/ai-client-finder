@@ -286,6 +286,23 @@ export function getValidOutreachApproval(
   return row ? parseApprovalRow(row) : null;
 }
 
+/**
+ * Latest approval ever recorded for an exact draft, regardless of status.
+ * Approvals are bound to the draft identity (prospect + draft + recipient +
+ * hash); this is used by the transport gate so a cross-prospect approval is
+ * detected as a binding violation instead of being silently treated as absent.
+ */
+export function getOutreachApprovalByDraft(
+  draftId: string,
+): OutreachApprovalRow | null {
+  const row = getDb()
+    .prepare(
+      "SELECT * FROM outreach_approvals WHERE draft_id = ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(draftId);
+  return row ? parseApprovalRow(row) : null;
+}
+
 export function listOutreachApprovalsByLead(
   leadId: string,
 ): OutreachApprovalRow[] {

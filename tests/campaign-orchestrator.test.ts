@@ -262,10 +262,15 @@ function seedDeploymentApprovalForVersion(
   });
 }
 
-function callOrchestrator(leadId: string, opts?: { campaignId?: string | null; iteration?: number; replyText?: string; stopRequested?: boolean; transportAvailable?: boolean }) {
+function callOrchestrator(leadId: string, opts?: { campaignId?: string | null; iteration?: number; replyText?: string; stopRequested?: boolean; transportAvailable?: boolean; transportConfigured?: boolean; transportProvider?: string }) {
   return evaluateNextAction(
     { leadId, campaignId: opts?.campaignId, iteration: opts?.iteration, replyText: opts?.replyText },
-    { stopRequested: opts?.stopRequested ?? false, transportAvailable: opts?.transportAvailable ?? true },
+    {
+      stopRequested: opts?.stopRequested ?? false,
+      transportAvailable: opts?.transportAvailable ?? true,
+      transportConfigured: opts?.transportConfigured ?? true,
+      transportProvider: opts?.transportProvider ?? "mock",
+    },
   );
 }
 

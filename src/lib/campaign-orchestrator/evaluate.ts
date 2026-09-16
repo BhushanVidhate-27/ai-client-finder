@@ -37,6 +37,10 @@ import {
   normalizeRecipientEmail,
 } from "@/lib/outreach-safety/safety";
 import { detectOptOutSignal } from "@/lib/outreach-safety/content-safety";
+import {
+  evaluateTransportSafety,
+  mapTransportDecision,
+} from "@/lib/transport-safety";
 import type { DeploymentApprovalRow } from "@/lib/data/deployment-approvals";
 import type { DeploymentRecord } from "@/lib/data/deployments";
 import type {
@@ -648,10 +652,47 @@ export function evaluateNextAction(
 
   const safetyState = mapOutreachDecision(safety.decision);
   if (safetyState === "READY_FOR_TRANSPORT") {
+    // Agent 10 (transport safety) is an independent gate: Agent 8 authorizing
+    // SEND is necessary but never sufficient. READY_FOR_TRANSPORT is only
+    // reachable when Agent 10 also returns TRANSPORT_READY, so Agent 9 can
+    // never bypass Agent 10.
+    const transport = evaluateTransportSafety(
+      {
+        leadId,
+        draftId: eligibleDraft.id,
+        recipientEmail,
+        campaignId,
+        agent8Decision: safety.decision,
+        replyText: input.replyText,
+        untrustedContext: input.untrustedContext,
+        provider: options.transportProvider,
+      },
+      {
+        stopRequested,
+        transportConfigured: options.transportConfigured,
+      },
+    );
+    checks.push({
+      id: "transport_safety",
+      label: "Transport safety gate (Agent 10) passed",
+      passed: transport.decision === "TRANSPORT_READY",
+      detail: transport.reason,
+    });
+    blockingIssues.push(...transport.blockingIssues);
+    if (transport.decision === "TRANSPORT_READY") {
+      return buildResult(
+        "READY_FOR_TRANSPORT",
+        "All safety gates passed and a human approval is bound to this exact outreach. Intent only — nothing was sent.",
+        [],
+      );
+    }
+    const transportState = mapTransportDecision(transport.decision);
     return buildResult(
-      "READY_FOR_TRANSPORT",
-      "All safety gates passed and a human approval is bound to this exact outreach. Intent only — nothing was sent.",
-      [],
+      transportState,
+      transport.reason,
+      transport.blockingIssues.length > 0
+        ? transport.blockingIssues
+        : [transport.reason],
     );
   }
   return buildResult(safetyState, safety.reason, safety.blockingIssues.length > 0 ? safety.blockingIssues : [safety.reason]);

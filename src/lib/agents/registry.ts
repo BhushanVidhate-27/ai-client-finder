@@ -4,6 +4,7 @@ import { sanityAgent } from "./sanity-agent";
 import { createWebsiteCodingAgent } from "@/lib/website-coding/agent";
 import { createWebsiteQaAgent } from "@/lib/website-qa/agent";
 import { createOutreachSafetyAgent } from "@/lib/outreach-safety/agent";
+import { createTransportSafetyAgent } from "@/lib/transport-safety/agent";
 import { createCampaignOrchestratorAgent } from "@/lib/campaign-orchestrator/agent";
 
 export type AgentDefinitionStatus = "available" | "planned";
@@ -133,6 +134,19 @@ export function seedDefaultAgents(): void {
     permissions: campaignOrchestratorAgent.permissions,
     status: "available",
     runner: campaignOrchestratorAgent,
+  });
+
+  // ---- runnable transport safety agent (Agent 10 / Step 17) ----
+
+  const transportSafetyAgent = createTransportSafetyAgent();
+  registerAgent({
+    id: transportSafetyAgent.id,
+    name: transportSafetyAgent.name,
+    description: transportSafetyAgent.description,
+    jobType: transportSafetyAgent.jobType,
+    permissions: transportSafetyAgent.permissions,
+    status: "available",
+    runner: transportSafetyAgent,
   });
 
   // ---- runnable website coding agent ----

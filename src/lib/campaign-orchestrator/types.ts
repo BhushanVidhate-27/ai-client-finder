@@ -73,4 +73,11 @@ export interface OrchestratorOptions {
   stopRequested?: boolean;
   /** Passed through to the outreach safety evaluation. */
   transportAvailable?: boolean;
+  /** Passed through to the Agent 10 transport-safety gate. */
+  transportConfigured?: boolean;
+  /**
+   * Transport provider id passed to the Agent 10 transport-safety gate.
+   * Defaults to EMAIL_TRANSPORT_PROVIDER when omitted.
+   */
+  transportProvider?: string;
 }

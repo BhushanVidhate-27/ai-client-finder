@@ -103,11 +103,13 @@ beforeEach(() => {
   process.env.WORKSPACES_ROOT = tmpRoot;
   process.env.SESSION_SECRET = "test-secret";
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
+  delete process.env.EMAIL_TRANSPORT_PROVIDER;
   delete process.env.MOCK_DEPLOYMENTS;
 });
 
 afterEach(() => {
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
+  delete process.env.EMAIL_TRANSPORT_PROVIDER;
   delete process.env.MOCK_DEPLOYMENTS;
   if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
 });
@@ -829,6 +831,7 @@ describe("Campaign Execution (Step 16) — durable runner + API", () => {
     seedOutreachApproval(lead.id, drafts[0].id, CONTACT_EMAIL);
 
     process.env.EMAIL_TRANSPORT_CONFIGURED = "true";
+    process.env.EMAIL_TRANSPORT_PROVIDER = "mock";
     const outcome = await runExecution(campaign.id, { registry });
     const report = outcome.result.prospects.find((p) => p.leadId === lead.id)!;
     expect(report.state).toBe("READY_FOR_TRANSPORT");
@@ -1015,6 +1018,7 @@ describe("Campaign Execution (Step 16) — durable runner + API", () => {
     seedOutreachApproval(lead.id, draft.id, CONTACT_EMAIL);
 
     process.env.EMAIL_TRANSPORT_CONFIGURED = "true";
+    process.env.EMAIL_TRANSPORT_PROVIDER = "mock";
     const first = await runExecution(campaign.id);
     const report = first.result.prospects.find((p) => p.leadId === lead.id)!;
     expect(report.state).toBe("READY_FOR_TRANSPORT");
