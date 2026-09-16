@@ -1,8 +1,9 @@
 # Email Transport (Step 17)
 
-Production transport abstraction with a deterministic mock provider. The only
-currently registered provider is `mock` — it performs zero network calls and
-never sends a real email.
+Production transport abstraction with a deterministic mock provider and a
+Resend adapter that is registered **only when server-configured**. Real sending
+is never automatic: nothing sends email unless an explicit, fully validated
+transport request is made and every safety gate has passed.
 
 ## Architecture
 
@@ -13,10 +14,29 @@ Transport intent
         ↓
 Email Transport Service (transportEmail)
         ↓
-Provider registry  →  MockProvider
+Provider registry  →  MockProvider | ResendProvider (when configured)
         ↓
-deterministic simulated delivery
+deterministic simulated delivery   |   Resend API (never automatic)
 ```
+
+## Provider registry
+
+Providers are an explicit allowlist:
+
+```
+mock   — deterministic simulated delivery (zero network), always registered
+resend — real provider, registered only when RESEND_API_KEY is set
+```
+
+The Resend adapter is registered **only when `RESEND_API_KEY` is configured**.
+Agent 10 marks the provider "configured" only when both `RESEND_API_KEY` and
+`RESEND_FROM_EMAIL` are present — configuration alone never authorizes sending.
+
+Adding a real provider requires:
+1. Implement `EmailTransportProvider` interface.
+2. Register it in the provider registry in `service.ts`.
+3. Add its id to `SUPPORTED_TRANSPORT_PROVIDERS` in `transport-safety/types.ts`.
+4. Set `EMAIL_TRANSPORT_PROVIDER=<id>` and `EMAIL_TRANSPORT_CONFIGURED=1` in env.
 
 ## Transport request
 
@@ -32,7 +52,7 @@ approved action:
 - `websiteVersionId` — current website version backing the outreach
 - `subject` / `body` — already-approved email content
 - `idempotencyKey` — deterministic key for this exact send
-- `providerId` — transport provider id (must be "mock")
+- `providerId` — transport provider id (must be "mock" or "resend")
 
 ## Agent 10 dependency
 
@@ -47,22 +67,18 @@ version, approval, or provider is rejected fail-closed.
 
 ## Provider registry
 
-Only `mock` is registered. Real providers are intentionally not registered.
+Only configured providers appear. `mock` is always registered. `resend` is
+registered only when `RESEND_API_KEY` is set.
 
 ```
-mock  — deterministic simulated delivery (zero network)
+mock   — deterministic simulated delivery (zero network)
+resend — real provider adapter (registered only when server-configured)
 ```
-
-Adding a real provider in the future requires:
-1. Implement `EmailTransportProvider` interface.
-2. Register it in the provider registry in `service.ts`.
-3. Add its id to `SUPPORTED_TRANSPORT_PROVIDERS` in `transport-safety/types.ts`.
-4. Set `EMAIL_TRANSPORT_PROVIDER=<id>` and `EMAIL_TRANSPORT_CONFIGURED=1` in env.
 
 ## Idempotency
 
-The same `idempotencyKey` never produces two simulated sends. The service uses
-an atomic claim pattern on the `outreach_sends` table:
+The same `idempotencyKey` never produces two sends (simulated or real). The
+service uses an atomic claim pattern on the `outreach_sends` table:
 
 1. Check if a row already exists for the key.
 2. If it exists and status is `sent`/`blocked` → return existing (duplicate).
@@ -99,11 +115,30 @@ Legal transitions:
 - Zero real emails.
 - Email subject and body are never modified by the provider.
 
+## Resend provider (Step 18)
+
+- Real provider adapter; registered only when `RESEND_API_KEY` is set.
+- Sends exactly the approved subject/body/recipient; never rewrites content.
+- From address comes only from `RESEND_FROM_EMAIL` (server config).
+- API key is read server-side, never logged, never exposed to clients, never
+  persisted, and never included in error messages or API responses.
+- Provider failures are normalized into safe internal codes
+  (`PROVIDER_NOT_CONFIGURED`, `PROVIDER_AUTH_FAILED`, `PROVIDER_RATE_LIMITED`,
+  `PROVIDER_REJECTED`, `PROVIDER_NETWORK_ERROR`, `PROVIDER_UNKNOWN_ERROR`).
+- Calling the adapter requires a fully validated `EmailTransportRequest` whose
+  `agent10Result.decision === "TRANSPORT_READY"` — all safety gates (Agent 8
+  SEND, Agent 9, Agent 10, human approval, opt-out, STOP/PAUSE, draft/recipient/
+  version/deployment bindings, idempotency) must have passed. Configuration alone
+  never authorizes sending.
+- Real sending is not enabled by default: the runner stops at
+  `READY_FOR_TRANSPORT`, no automatic or bulk sending exists, and `mock`
+  remains the dev/test default.
+
 ## Security
 
 The transport service never:
 - Executes shell commands.
-- Fetches arbitrary URLs.
+- Fetches arbitrary URLs (Resend HTTP goes only to the fixed Resend endpoint).
 - Calls arbitrary APIs.
 - Logs credentials.
 - Accepts arbitrary provider implementations from user input.
@@ -125,7 +160,11 @@ specified scenarios (A–AD), including:
 - All binding mismatches → reject.
 - Content hash tampering → reject.
 - Duplicate idempotency → exactly one simulated send.
-- Unknown/real provider names → reject.
+- Unknown/unsupported provider names → reject.
 - Subject/body not modified.
 - Zero network calls.
 - No actual email side effects.
+
+The Resend adapter tests (`tests/resend-transport.test.ts`) cover the real
+provider contract with a mocked HTTP boundary — no real Resend API call and no
+real email is ever attempted by the test suite.

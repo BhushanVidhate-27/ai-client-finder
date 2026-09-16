@@ -72,11 +72,15 @@ beforeEach(() => {
   resetDatabase(getDb());
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
   delete process.env.EMAIL_TRANSPORT_PROVIDER;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.RESEND_FROM_EMAIL;
 });
 
 afterEach(() => {
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
   delete process.env.EMAIL_TRANSPORT_PROVIDER;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.RESEND_FROM_EMAIL;
   vi.restoreAllMocks();
 });
 
@@ -645,11 +649,11 @@ describe("Email Transport Service (Step 17)", () => {
 
   // -- S. real provider name → reject --------------------------------------
 
-  it("S. real provider name → reject", async () => {
+  it("S. unsupported real provider name → reject", async () => {
     const fix = fullReady(makePlaceId("real-provider"));
     const request = buildRequest(fix);
 
-    for (const provider of ["resend", "sendgrid", "mailgun", "smtp", "gmail", "outlook"]) {
+    for (const provider of ["sendgrid", "mailgun", "smtp", "gmail", "outlook"]) {
       request.providerId = provider;
       await expect(transportEmail({ ...request })).rejects.toThrow(EmailTransportError);
     }
@@ -895,21 +899,32 @@ describe("Email Transport Service (Step 17)", () => {
 // ---------------------------------------------------------------------------
 
 describe("Email Transport Provider Registry", () => {
-  it("only 'mock' provider is registered", async () => {
+  it("mock + resend registration follows server configuration", async () => {
     const { listRegisteredProviders } = await import("@/lib/email-transport/service");
+
+    // No Resend env → only mock is registered.
+    delete process.env.RESEND_API_KEY;
+    delete process.env.RESEND_FROM_EMAIL;
     const providers = listRegisteredProviders();
     expect(providers).toHaveLength(1);
     expect(providers[0].id).toBe("mock");
     expect(providers[0].isMock).toBe(true);
+
+    // Resend configured → mock stays registered and resend appears as not-mock.
+    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.RESEND_FROM_EMAIL = "hello@example.com";
+    const withResend = listRegisteredProviders();
+    expect(withResend.map((p) => p.id)).toEqual(["mock", "resend"]);
+    expect(withResend.find((p) => p.id === "resend")!.isMock).toBe(false);
   });
 
   it("unsupported provider names are rejected", async () => {
     const fix = fullReady(makePlaceId("unsupported-provider"));
     const request = buildRequest(fix);
-    request.providerId = "resend";
+    request.providerId = "sendgrid";
     request.agent10Result = {
       ...request.agent10Result,
-      provider: { id: "resend", supported: false, configured: false },
+      provider: { id: "sendgrid", supported: false, configured: false },
     } as typeof request.agent10Result;
 
     await expect(transportEmail(request)).rejects.toThrow(EmailTransportError);

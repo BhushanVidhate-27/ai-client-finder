@@ -282,7 +282,7 @@ export function getValidOutreachApproval(
 ): OutreachApprovalRow | null {
   const row = getDb()
     .prepare(
-      "SELECT * FROM outreach_approvals WHERE draft_id = ? AND status = 'valid' ORDER BY created_at DESC LIMIT 1",
+      "SELECT * FROM outreach_approvals WHERE draft_id = ? AND status = 'valid' ORDER BY created_at DESC, rowid DESC LIMIT 1",
     )
     .get(draftId);
   return row ? parseApprovalRow(row) : null;
@@ -299,7 +299,7 @@ export function getOutreachApprovalByDraft(
 ): OutreachApprovalRow | null {
   const row = getDb()
     .prepare(
-      "SELECT * FROM outreach_approvals WHERE draft_id = ? ORDER BY created_at DESC LIMIT 1",
+      "SELECT * FROM outreach_approvals WHERE draft_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
     )
     .get(draftId);
   return row ? parseApprovalRow(row) : null;

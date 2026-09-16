@@ -65,11 +65,16 @@ SKIP_PROSPECT   -> SKIP_PROSPECT
 - `EMAIL_TRANSPORT_PROVIDER` (env) or `input.provider` selects the provider id.
 - `EMAIL_TRANSPORT_CONFIGURED` (`1`/`true`) or `options.transportConfigured`
   marks it configured.
-- `SUPPORTED_TRANSPORT_PROVIDERS` currently contains only `"mock"`. No
-  transport adapter is implemented anywhere in this repository — these are
-  identifiers used by the gate so that unsupported providers are rejected
-  (`REJECT`) and unconfigured ones wait (`WAIT`). Adding a real adapter is a
-  separate, future step.
+- `SUPPORTED_TRANSPORT_PROVIDERS` is an explicit allowlist: `"mock"` and
+  `"resend"`.
+  - `"mock"` is the dev/test identifier, always registered, zero network.
+  - `"resend"` is a real-provider identifier. It is only marked **configured**
+    when `EMAIL_TRANSPORT_CONFIGURED`/`transportConfigured` is true AND
+    `RESEND_API_KEY` + `RESEND_FROM_EMAIL` are present server-side
+    (`isResendProviderReady`). Configuration alone never authorizes sending.
+  - Unsupported providers are rejected (`REJECT`) and unconfigured ones wait
+    (`WAIT`). Provider configuration is always evaluated last, so it can never
+    override a safety decision.
 
 ## Integration
 

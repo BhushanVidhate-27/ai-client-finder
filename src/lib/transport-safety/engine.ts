@@ -37,6 +37,7 @@ import {
   normalizeRecipientEmail,
   isValidRecipientEmail,
 } from "@/lib/outreach-safety/safety";
+import { isResendProviderReady } from "@/lib/email-transport/config";
 import {
   SUPPORTED_TRANSPORT_PROVIDERS,
   type TransportCheck,
@@ -676,14 +677,20 @@ export function evaluateTransportSafety(
       `Transport provider "${providerId}" is not supported.`,
     );
   }
-  const configured = options.transportConfigured ?? defaultEnvConfigured();
+  const genericConfigured = options.transportConfigured ?? defaultEnvConfigured();
+  const configured =
+    providerId === "resend"
+      ? genericConfigured && isResendProviderReady()
+      : genericConfigured;
   pass({
     id: "provider_configured",
     label: "Transport provider is configured",
     passed: configured,
     detail: configured
       ? undefined
-      : "EMAIL_TRANSPORT_CONFIGURED is not set to true.",
+      : providerId === "resend"
+        ? "RESEND_API_KEY / RESEND_FROM_EMAIL are not configured for this provider."
+        : "EMAIL_TRANSPORT_CONFIGURED is not set to true.",
   });
   if (!configured) {
     return buildResult(

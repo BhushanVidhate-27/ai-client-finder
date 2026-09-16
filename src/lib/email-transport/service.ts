@@ -37,6 +37,8 @@ import {
 import { logActivity } from "@/lib/data/activity";
 import { normalizeRecipientEmail } from "@/lib/outreach-safety/safety";
 import { MockEmailTransportProvider } from "@/lib/email-transport/providers/mock";
+import { ResendEmailTransportProvider } from "@/lib/email-transport/providers/resend";
+import { isResendConfigured } from "@/lib/email-transport/config";
 import type {
   EmailDeliveryResult,
   EmailTransportOptions,
@@ -50,24 +52,40 @@ import { SUPPORTED_TRANSPORT_PROVIDERS } from "@/lib/transport-safety/types";
 // Error
 // ---------------------------------------------------------------------------
 
+/**
+ * Transport error. `code` is an optional, safe, stable internal category
+ * (e.g. PROVIDER_AUTH_FAILED) so admin tooling can react without parsing raw
+ * provider messages. The `message` never contains credentials.
+ */
 export class EmailTransportError extends Error {
-  constructor(message: string) {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "EmailTransportError";
+    this.code = code;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Provider registry (only "mock" is registered)
+// Provider registry (allowlist; resend only when configured)
 // ---------------------------------------------------------------------------
 
 const MOCK_PROVIDER = new MockEmailTransportProvider();
-const REGISTERED_PROVIDERS = new Map<string, EmailTransportProvider>([
-  ["mock", MOCK_PROVIDER],
-]);
+
+function getResendProvider(): EmailTransportProvider | null {
+  return isResendConfigured() ? new ResendEmailTransportProvider() : null;
+}
 
 function getProvider(id: string): EmailTransportProvider | null {
-  return REGISTERED_PROVIDERS.get(id) ?? null;
+  switch (id) {
+    case "mock":
+      return MOCK_PROVIDER;
+    case "resend":
+      return getResendProvider();
+    default:
+      return null;
+  }
 }
 
 export function listRegisteredProviders(): Array<{
@@ -75,7 +93,11 @@ export function listRegisteredProviders(): Array<{
   label: string;
   isMock: boolean;
 }> {
-  return [...REGISTERED_PROVIDERS.values()].map((p) => ({
+  const providers: EmailTransportProvider[] = [MOCK_PROVIDER];
+  const resend = getResendProvider();
+  if (resend) providers.push(resend);
+
+  return providers.map((p) => ({
     id: p.providerId,
     label: p.providerLabel,
     isMock: p.isMock,
@@ -348,14 +370,20 @@ export async function transportEmail(
   try {
     delivery = await provider.send(request);
   } catch (error) {
+    const failureMessage =
+      error instanceof Error ? error.message : "Provider call failed.";
     updateOutreachSend(sendId, {
       status: "failed",
-      failureReason:
-        error instanceof Error ? error.message : "Provider call failed.",
+      failureReason: failureMessage,
       provider: request.providerId,
     });
+    // Preserve the provider's safe internal error category so callers can act
+    // on it without parsing messages. The message never contains secrets.
+    const code =
+      error instanceof EmailTransportError ? error.code : undefined;
     throw new EmailTransportError(
-      `Transport provider "${request.providerId}" failed: ${error instanceof Error ? error.message : "unknown error"}.`,
+      `Transport provider "${request.providerId}" failed: ${failureMessage}.`,
+      code,
     );
   }
 

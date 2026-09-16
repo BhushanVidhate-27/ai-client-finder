@@ -112,10 +112,13 @@ export interface EmailTransportOutcome {
 // ---------------------------------------------------------------------------
 
 /**
- * Email transport provider adapter. One implementation per provider.
+ * Email Transport Provider contract. One implementation per provider.
  * The transport service depends only on this interface; adding a real provider
  * means implementing this and registering it.
  *
+ * The two registered providers are:
+ *   "mock"   — deterministic simulator (zero network)
+ *   "resend" — real provider, registered only when RESEND_API_KEY is set
  * Providers are never called with arbitrary client-supplied configuration —
  * credentials are read server-side and never flow through the wire types.
  * Every method may throw EmailTransportError with a safe message.

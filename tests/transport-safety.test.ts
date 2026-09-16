@@ -62,11 +62,15 @@ beforeEach(() => {
   resetDatabase(getDb());
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
   delete process.env.EMAIL_TRANSPORT_PROVIDER;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.RESEND_FROM_EMAIL;
 });
 
 afterEach(() => {
   delete process.env.EMAIL_TRANSPORT_CONFIGURED;
   delete process.env.EMAIL_TRANSPORT_PROVIDER;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.RESEND_FROM_EMAIL;
 });
 
 function makePlaceId(label: string): string {
@@ -612,9 +616,18 @@ describe("Transport Safety (Agent 10 / Step 17) — engine", () => {
 
   it("AC. invalid (unsupported) provider → REJECT", () => {
     const { lead, campaign, draft } = fullReady(makePlaceId("bad-provider"));
-    const result = check(lead.id, draft.id, campaign.id, { provider: "resend" });
+    const result = check(lead.id, draft.id, campaign.id, { provider: "sendgrid" });
     expect(result.decision).toBe("REJECT");
     expect(result.code).toBe("PROVIDER_NOT_SUPPORTED");
+  });
+
+  it("AC-2. supported resend provider without server credentials → WAIT (not configured)", () => {
+    const { lead, campaign, draft } = fullReady(makePlaceId("resend-unconfigured"));
+    delete process.env.RESEND_API_KEY;
+    delete process.env.RESEND_FROM_EMAIL;
+    const result = check(lead.id, draft.id, campaign.id, { provider: "resend" });
+    expect(result.decision).toBe("WAIT");
+    expect(result.code).toBe("PROVIDER_NOT_CONFIGURED");
   });
 
   it("AD. missing provider configuration → WAIT", () => {
@@ -767,12 +780,25 @@ describe("Agent 9 integration — READY_FOR_TRANSPORT requires Agent 10 TRANSPOR
     const { lead, campaign } = fullReady(makePlaceId("int-reject"));
     const r = callOrchestrator(lead.id, {
       campaignId: campaign.id,
-      transportProvider: "resend",
+      transportProvider: "sendgrid",
       transportConfigured: true,
     });
     expect(r.state).not.toBe("READY_FOR_TRANSPORT");
     expect(r.state).toBe("SKIP_PROSPECT");
     expect(r.checks.find((c) => c.id === "transport_safety")?.passed).toBe(false);
+  });
+
+  it("Resend provider configured server-side → Agent 9 READY_FOR_TRANSPORT", () => {
+    const { lead, campaign } = fullReady(makePlaceId("int-resend"));
+    process.env.RESEND_API_KEY = "re_test_cfg";
+    process.env.RESEND_FROM_EMAIL = "hello@example.com";
+    const r = callOrchestrator(lead.id, {
+      campaignId: campaign.id,
+      transportProvider: "resend",
+      transportConfigured: true,
+    });
+    expect(r.state).toBe("READY_FOR_TRANSPORT");
+    expect(r.checks.find((c) => c.id === "transport_safety")?.passed).toBe(true);
   });
 
   it("STOP after previously READY invalidates READY_FOR_TRANSPORT", () => {

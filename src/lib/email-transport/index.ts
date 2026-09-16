@@ -9,6 +9,15 @@
 
 export { transportEmail, EmailTransportError, listRegisteredProviders } from "@/lib/email-transport/service";
 export { MockEmailTransportProvider, buildMockMessageId } from "@/lib/email-transport/providers/mock";
+export { ResendEmailTransportProvider } from "@/lib/email-transport/providers/resend";
+export {
+  readEmailTransportConfig,
+  isResendConfigured,
+  isResendProviderReady,
+  getAvailableProviders,
+  ENV_RESEND_API_KEY,
+  ENV_RESEND_FROM_EMAIL,
+} from "@/lib/email-transport/config";
 export type {
   EmailTransportRequest,
   EmailTransportOutcome,

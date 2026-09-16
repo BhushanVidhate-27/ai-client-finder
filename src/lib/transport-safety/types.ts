@@ -22,12 +22,15 @@ export type TransportDecision =
   | "SKIP_PROSPECT";
 
 /**
- * The only transport provider identifiers this gate recognises. No transport
- * adapter is implemented yet; "mock" is the single test/dev identifier so that
- * no real-world provider can ever be claimed as "configured" before a real
- * adapter exists. Adding an adapter is a future, separate step.
+ * The only transport provider identifiers this gate recognises. "mock" is the
+ * dev/test identifier (always registered, zero network). "resend" is a real
+ * provider identifier that is only granted READY status when the Resend
+ * adapter is configured server-side. No provider can ever be claimed as
+ * "configured" — and nothing is ever sent — until the adapter exists AND is
+ * configured AND every safety gate passes. Provider configuration is evaluated
+ * LAST and can never override a safety decision.
  */
-export const SUPPORTED_TRANSPORT_PROVIDERS = ["mock"] as const;
+export const SUPPORTED_TRANSPORT_PROVIDERS = ["mock", "resend"] as const;
 
 export type SupportedTransportProvider =
   (typeof SUPPORTED_TRANSPORT_PROVIDERS)[number];
