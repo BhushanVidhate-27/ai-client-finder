@@ -329,6 +329,24 @@ const MIGRATIONS: Migration[] = [
         ON deployment_approvals(website_version_id) WHERE status = 'valid';
     `,
   },
+  {
+    version: 7,
+    sql: `
+      -- Email transport persistence (Step 17).
+      --
+      -- outreach_sends is reused as the durable transport-attempt table. The
+      -- transport service transitions the existing status lifecycle
+      -- (authorized -> sent | failed), preserving the existing unique
+      -- idempotency key and unique (lead, draft, recipient, hash) binding so a
+      -- duplicate transport is structurally impossible. provider and message_id
+      -- record which provider produced the result (currently always "mock").
+      ALTER TABLE outreach_sends ADD COLUMN provider TEXT;
+      ALTER TABLE outreach_sends ADD COLUMN message_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_outreach_sends_provider
+        ON outreach_sends(provider) WHERE provider IS NOT NULL;
+    `,
+  },
 ];
 
 export function migrate(db: DatabaseSync): void {

@@ -133,6 +133,8 @@ function parseSendRow(row: StoredRow): OutreachSendRow {
       : null,
     deploymentUrl: row.deployment_url ? String(row.deployment_url) : null,
     failureReason: row.failure_reason ? String(row.failure_reason) : null,
+    provider: row.provider ? String(row.provider) : null,
+    messageId: row.message_id ? String(row.message_id) : null,
     metadata: parseMetadata(row.metadata_json),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -368,7 +370,12 @@ export function removeOutreachOptOut(leadId: string): boolean {
 // Send authorization / idempotency
 // ---------------------------------------------------------------------------
 
-export type OutreachSendStatus = "authorized" | "sent" | "blocked" | "failed";
+export type OutreachSendStatus =
+  | "authorized"
+  | "sending"
+  | "sent"
+  | "blocked"
+  | "failed";
 
 export interface OutreachSendRow {
   id: string;
@@ -382,6 +389,8 @@ export interface OutreachSendRow {
   websiteVersionId: string | null;
   deploymentUrl: string | null;
   failureReason: string | null;
+  provider: string | null;
+  messageId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -487,6 +496,115 @@ export function recordSendAuthorization(
       now,
     );
   return getOutreachSendByKey(input.idempotencyKey)!;
+}
+
+export interface OutreachSendUpdateInput {
+  status?: OutreachSendStatus;
+  failureReason?: string | null;
+  metadata?: Record<string, unknown>;
+  messageId?: string | null;
+  provider?: string | null;
+}
+
+/**
+ * Updates a send record in place. Used by the email transport service to
+ * transition an `authorized` row to `sent` (or `failed`) after a provider
+ * run, and to record the provider metadata for auditability. Legal state
+ * transitions are enforced by the caller (transport service), not here: this
+ * is a low-level persistence helper.
+ */
+export function updateOutreachSend(
+  id: string,
+  input: OutreachSendUpdateInput,
+): OutreachSendRow | null {
+  const db = getDb();
+  const existing = db
+    .prepare("SELECT * FROM outreach_sends WHERE id = ?")
+    .get(id) as StoredRow | undefined;
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const currentMetadata =
+    existing.metadata_json && typeof existing.metadata_json === "string"
+      ? (() => {
+          try {
+            return JSON.parse(existing.metadata_json) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
+        })()
+      : {};
+
+  const status = input.status ?? String(existing.status);
+  const provider =
+    input.provider !== undefined
+      ? input.provider
+      : existing.provider
+        ? String(existing.provider)
+        : null;
+  const messageId =
+    input.messageId !== undefined
+      ? input.messageId
+      : existing.message_id
+        ? String(existing.message_id)
+        : null;
+  const failureReason =
+    input.failureReason !== undefined
+      ? input.failureReason
+      : existing.failure_reason
+        ? String(existing.failure_reason)
+        : null;
+  const metadata = {
+    ...currentMetadata,
+    ...input.metadata,
+  };
+
+  db.prepare(
+    `UPDATE outreach_sends
+       SET status = ?, provider = ?, message_id = ?, failure_reason = ?,
+           metadata_json = ?, updated_at = ?
+       WHERE id = ?`,
+  ).run(
+    status,
+    provider,
+    messageId,
+    failureReason,
+    JSON.stringify(metadata),
+    now,
+    id,
+  );
+  return getOutreachSendByKey(String(existing.idempotency_key));
+}
+
+/**
+ * Atomically claims a send record for transport by transitioning it from a
+ * non-in-flight status to "sending". Returns the claimed row on success, or
+ * null when another concurrent caller has already claimed it.
+ *
+ * Legal transitions:
+ *   authorized → sending (fresh claim)
+ *   failed     → sending (explicit retry)
+ */
+export function claimOutreachSendForTransport(
+  id: string,
+): OutreachSendRow | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const result = db
+    .prepare(
+      `UPDATE outreach_sends
+         SET status = 'sending', updated_at = ?
+       WHERE id = ? AND status IN ('authorized', 'failed')`,
+    )
+    .run(now, id);
+  if (Number(result.changes) === 0) return null;
+  return getOutreachSendByKey(
+    (
+      db
+        .prepare("SELECT idempotency_key FROM outreach_sends WHERE id = ?")
+        .get(id) as { idempotency_key: string }
+    )?.idempotency_key,
+  );
 }
 
 export function listOutreachSendsByLead(
