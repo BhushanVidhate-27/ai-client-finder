@@ -723,14 +723,15 @@ describe("Campaign Orchestrator (Agent 9 / Step 15) — state machine", () => {
   it("45. approval bound to different draft (wrong hash) → WAIT_FOR_OUTREACH_APPROVAL", () => {
     const { lead } = seedProspect(makePlaceId("wrong-hash"));
     seedVerifiedLiveSite(lead.id, LIVE_URL);
-    seedDraft(lead.id);
-    // create a second draft (different hash)
-    const otherDraft = seedDraft(lead.id, { body: "Different body content for other draft." });
+    const draft = seedDraft(lead.id);
+    // Approve the draft's id but with a wrong content hash — the approval must
+    // never bind to changed draft content. A single draft keeps the outcome
+    // deterministic (no ordering race between same-millisecond drafts).
     createOutreachApproval({
       leadId: lead.id,
-      draftId: otherDraft.id,
+      draftId: draft.id,
       recipientEmail: CONTACT_EMAIL,
-      draftHash: otherDraft.contentHash,
+      draftHash: "hash-of-different-content",
       createdBy: "user-1",
     });
     const r = callOrchestrator(lead.id);
