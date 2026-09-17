@@ -20,6 +20,23 @@ export async function requireAuth(
   return readSessionFromRequest(request);
 }
 
+/**
+ * Same-origin (CSRF) check for mutating requests. Mirrors the proxy's
+ * enforcement so high-stakes routes stay protected even when invoked directly
+ * (e.g. tests, or if proxy config changes). A request without a matching
+ * Origin header is rejected.
+ */
+export function isSameOriginRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  const host = request.headers.get("host");
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export function unauthorizedResponse(): NextResponse {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }

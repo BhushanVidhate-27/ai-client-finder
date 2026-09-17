@@ -180,6 +180,27 @@ interface OutreachSendItem {
   updatedAt: string;
 }
 
+interface SendStatusPreview {
+  ok: boolean;
+  ready: boolean;
+  alreadySent: boolean;
+  blockedReason: string | null;
+  prospect: { id: string; businessName: string };
+  recipientEmail: string | null;
+  draft: { id: string; subject: string | null; status: string };
+  campaign: { id: string | null; status: string | null };
+  optOut: boolean;
+  provider: { id: string; configured: boolean };
+  agent8: { decision: string };
+  agent10: { decision: string };
+  approval: {
+    valid: boolean;
+    boundToDraft: boolean;
+    boundToRecipient: boolean;
+    boundToProspect: boolean;
+  };
+}
+
 function fromCampaignLeadView(view: CampaignLeadView): LeadItem {
   const qualification = view.qualification ?? null;
   return {
@@ -901,6 +922,7 @@ function LeadDetailPane({
 
       <OutreachSafetySection
         leadId={lead.leadId}
+        businessName={lead.businessName}
         contactEmail={lead.contactDiscovery?.email ?? null}
         drafts={outreachDrafts}
         approvals={outreachApprovals}
@@ -1207,6 +1229,7 @@ function DeploymentSection({
 
 function OutreachSafetySection({
   leadId,
+  businessName,
   contactEmail,
   drafts,
   approvals,
@@ -1214,6 +1237,7 @@ function OutreachSafetySection({
   sends,
 }: {
   leadId: string;
+  businessName: string;
   contactEmail: string | null;
   drafts: OutreachDraftItem[];
   approvals: OutreachApprovalItem[];
@@ -1222,10 +1246,47 @@ function OutreachSafetySection({
 }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sendStatus, setSendStatus] = useState<SendStatusPreview | null>(null);
+  const [sendStatusLoading, setSendStatusLoading] = useState(false);
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
 
   const latestDraft = drafts[0] ?? null;
   const hasApproval =
     approvals.length > 0 && approvals[0].status === "valid";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!latestDraft || optOut) {
+      return;
+    }
+    const load = async () => {
+      setSendStatusLoading(true);
+      try {
+        const response = await fetch(
+          `/api/admin/outreach/send-status?prospectId=${encodeURIComponent(
+            leadId,
+          )}&draftId=${encodeURIComponent(latestDraft.id)}`,
+        );
+        if (cancelled) return;
+        if (!response.ok) {
+          setSendStatus(null);
+          return;
+        }
+        const data = (await response.json()) as SendStatusPreview;
+        setSendStatus(data);
+      } catch {
+        if (!cancelled) setSendStatus(null);
+      } finally {
+        if (!cancelled) setSendStatusLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId, latestDraft, optOut, sends.length]);
 
   const approve = async (draftId: string) => {
     setBusy(true);
@@ -1282,6 +1343,47 @@ function OutreachSafetySection({
       setNotice(error instanceof Error ? error.message : "Revoke failed.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const sendOneEmail = async () => {
+    if (!latestDraft) return;
+    setSendBusy(true);
+    setSendNotice(null);
+    try {
+      const response = await fetch("/api/admin/outreach/send-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prospectId: leadId,
+          draftId: latestDraft.id,
+          confirm: true,
+        }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        code?: string;
+        delivery?: { provider?: string; messageId?: string; status?: string };
+      };
+      if (!response.ok) {
+        setSendNotice(
+          `${data.error ?? "Send rejected by the safety chain."}${
+            data.code ? ` (${data.code})` : ""
+          }`,
+        );
+      } else {
+        const provider = data.delivery?.provider ?? "resend";
+        const messageId = data.delivery?.messageId ?? "n/a";
+        const status = data.delivery?.status ?? "sent";
+        setSendNotice(
+          `Sent one email. Provider: ${provider} · status: ${status} · provider message id: ${messageId}. No second email will be sent for the same approved outreach.`,
+        );
+      }
+      setShowSendConfirm(false);
+    } catch (error) {
+      setSendNotice(error instanceof Error ? error.message : "Send failed.");
+    } finally {
+      setSendBusy(false);
     }
   };
 
@@ -1386,6 +1488,59 @@ function OutreachSafetySection({
           <p className="text-gray-500">No outreach drafts for this lead.</p>
         )}
 
+        {latestDraft && !optOut ? (
+          <div className="rounded-md border border-gray-200 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs">
+                <span className="font-medium text-gray-700">
+                  Current safety status:{" "}
+                </span>
+                {sendStatusLoading ? (
+                  <span className="text-gray-500">checking…</span>
+                ) : sendStatus?.ready ? (
+                  <span className="font-medium text-green-700">
+                    Ready to send
+                  </span>
+                ) : (
+                  <span className="text-amber-700">
+                    {sendStatus?.blockedReason ?? "Not ready"}
+                  </span>
+                )}
+                {sendStatus?.provider ? (
+                  <span className="text-gray-500">
+                    {" "}
+                    · provider: {sendStatus.provider.id}
+                    {sendStatus.provider.configured
+                      ? " (configured)"
+                      : " (not configured)"}
+                  </span>
+                ) : null}
+              </div>
+              <button
+                onClick={() => setShowSendConfirm(true)}
+                disabled={
+                  sendBusy ||
+                  !sendStatus?.ready ||
+                  Boolean(sendStatus?.alreadySent)
+                }
+                className="rounded-md bg-red-700 px-3 py-1 text-xs font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                title={
+                  !sendStatus?.ready
+                    ? "The safety chain is not ready. Resolve the blocked reason above first."
+                    : sendStatus?.alreadySent
+                      ? "This exact outreach was already sent. Nothing else may be sent."
+                      : "Sends exactly ONE real email to the verified recipient."
+                }
+              >
+                Send ONE real email
+              </button>
+            </div>
+            {sendNotice ? (
+              <p className="mt-2 text-xs text-gray-700">{sendNotice}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {drafts.length > 1 ? (
           <p className="text-xs text-gray-400">
             {drafts.length} drafts total; showing the latest.
@@ -1399,6 +1554,89 @@ function OutreachSafetySection({
           </div>
         ) : null}
       </div>
+
+      {showSendConfirm && latestDraft ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-gray-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="send-one-title"
+            aria-describedby="send-one-description"
+            className="w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl"
+          >
+            <h2
+              id="send-one-title"
+              className="text-sm font-semibold text-red-800"
+            >
+              Send ONE real email
+            </h2>
+            <p
+              id="send-one-description"
+              className="mt-2 text-xs leading-relaxed text-gray-600"
+            >
+              This sends exactly one real email to one verified recipient,
+              through the approved draft and the Resend provider. Nothing else
+              is sent, scheduled or triggered.
+            </p>
+
+            <div className="mt-3 space-y-1 rounded-md bg-gray-50 p-3 text-xs text-gray-700">
+              <div>
+                <span className="font-medium text-gray-500">Prospect / business: </span>
+                {businessName}
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Recipient (verified): </span>
+                {sendStatus?.recipientEmail ?? contactEmail ?? "—"}
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Approved subject: </span>
+                {latestDraft.subject ?? "(no subject)"}
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Provider: </span>
+                Resend{" "}
+                {sendStatus?.provider.configured ? "" : "(not configured)"}
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Safety status: </span>
+                {sendStatus?.ready
+                  ? "Ready — all gates pass"
+                  : (sendStatus?.blockedReason ?? "Not ready")}
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Content hash: </span>
+                {latestDraft.contentHash.slice(0, 12)}
+              </div>
+            </div>
+
+            <p className="mt-3 text-center text-[11px] text-gray-400 sm:text-left">
+              The recipient, subject, body, from address, version and provider
+              are read from approved server state; they cannot be edited here.
+            </p>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => setShowSendConfirm(false)}
+                disabled={sendBusy}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void sendOneEmail()}
+                disabled={
+                  sendBusy ||
+                  !sendStatus?.ready ||
+                  Boolean(sendStatus?.alreadySent)
+                }
+                className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sendBusy ? "Sending…" : "Confirm & send one email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

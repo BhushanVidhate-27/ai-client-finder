@@ -134,6 +134,38 @@ Legal transitions:
   `READY_FOR_TRANSPORT`, no automatic or bulk sending exists, and `mock`
   remains the dev/test default.
 
+## Controlled single-email send (Step 19)
+
+The admin-only, single-recipient send path lives in
+`src/lib/email-transport/controlled-send.ts` and is exposed as
+`POST /api/admin/outreach/send-test`. It sends exactly **one** real email when
+every gate passes:
+
+- authenticated admin + same-origin (CSRF) + `confirm: true`
+- campaign running, no opt-out, verified recipient
+- Agent 8 returns `SEND` (side-effect-free evaluation, `recordAuthorization: false`)
+- Agent 10 returns `TRANSPORT_READY` for provider `resend`
+- Resend is actually configured server-side
+- the idempotency key is unused (a repeated request is a duplicate/blocked; it
+  never causes a second provider call)
+
+The request carries only `{ prospectId, draftId, confirm: true }`. Recipient,
+subject, body, from address, content hash, website version and provider are
+resolved exclusively from approved persisted state. A repeated or concurrent
+request produces at most one provider call.
+
+The admin confirmation UI on the History page ("Outreach Safety" →
+"Send ONE real email") drives the same endpoint. It renders a read-only preview
+from `GET /api/admin/outreach/send-status` — business, verified recipient,
+approved subject, provider and current Agent 8 / Agent 10 safety status — with
+none of those fields editable, and requires the explicit "Confirm & send one
+email" step. The preview endpoint is a pure reader: it never sends and never
+writes.
+
+The manual real-email procedure is documented in
+`docs/manual-real-email-send.md`; automated tests always mock the Resend HTTP
+boundary and never send real email.
+
 ## Security
 
 The transport service never:
